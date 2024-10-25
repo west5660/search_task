@@ -1,0 +1,145 @@
+import asyncio
+import webbrowser
+import os
+from crowd_sdk.tagme import TagmeClientAdvanced
+import sys
+
+
+async def get_task_info(client, task_id, organization_id):
+    try:
+        task_info = await client.get_task(task_id, organization_id=organization_id)
+        project_info = await client.get_project(task_info.project_id, organization_id=organization_id)
+        organization_info = await client.get_organization(task_info.organization_id)
+
+        return task_info, project_info, organization_info
+    except Exception:
+        return None, None, None
+
+
+async def get_project_by_task_id(instance, task_id, client):
+    config_path = os.path.expanduser('~/configs/.sigma.cfg')
+    link = 'tagme.apps.prom-gen.sigma.sbrf.ru'
+    if instance == 'Sigma':
+        config_path = os.path.expanduser('~/configs/.sigma.cfg')
+        link = 'tagme.apps.prom-gen.sigma.sbrf.ru'
+    elif instance == 'Cloud':
+        config_path = os.path.expanduser('~/configs/.cloud.cfg')
+        link = 'tagme.sberdevices.ru/'
+
+    if not config_path or not link:
+        print('Неверно выбран инстанс')
+        return
+    organizations = await client.get_organizations()
+    or_stderr = sys.stderr                              #скрываем ошибки о неудачных итерациях
+    sys.stderr = open(os.devnull, 'w')
+    try:
+        for organization in organizations:
+            organization_id = organization.uid
+            task_info, project_info, organization_info = await get_task_info(client, task_id, organization_id)
+
+            if task_info and project_info and organization_info:
+                print('Организация - ', organization_info.name)
+                print(
+                    f"Ссылка на проект: \nhttps://{link}/company/{organization_info.uid}/project/{project_info.uid}/task/{task_id}/overview")
+                print('Название проекта - ', project_info.name)
+                print('Название задачи - ', task_info.name)
+
+                url = f"https://{link}/company/{organization_info.uid}/project/{project_info.uid}/task/{task_id}/overview"
+                webbrowser.open(url, new=2)
+                return
+    except Exception as e:
+        print(f"Ошибка при получении списка организаций: {e}")
+    sys.stderr.close()                                       #скрываем ошибки о неудачных итерациях
+    sys.stderr = or_stderr
+
+
+async def get_project_by_task_name(instance, task_name, client):
+    config_path = os.path.expanduser('~/configs/.sigma.cfg')
+    link = 'tagme.apps.prom-gen.sigma.sbrf.ru'
+    if instance == 'Sigma':
+        config_path = os.path.expanduser('~/configs/.sigma.cfg')
+        link = 'tagme.apps.prom-gen.sigma.sbrf.ru'
+    elif instance == 'Cloud':
+        config_path = os.path.expanduser('~/configs/.cloud.cfg')
+        link = 'tagme.sberdevices.ru/'
+
+    if not config_path or not link:
+        print('Неверно выбран инстанс')
+        return
+    organizations = await client.get_organizations()
+
+    try:
+
+        results = []
+
+        for organization in organizations:
+            organization_id = organization.uid
+            tasks = await client.get_tasks(organization_id=organization_id)
+
+            for task in tasks:
+                if task_name.lower() in task.name.lower():
+                    results.append((task, organization_id))
+
+        if results:
+            print('Рузультат сохранен в файл result.txt')
+            # print("Результаты поиска по названию задачи:")
+            # for task, organization_id in results:
+            #     task_info, project_info, organization_info = await get_task_info(client, task.uid, organization_id)
+            #     print('Организация - ', organization_info.name)
+            #     print(
+            #         f"Ссылка на проект: \nhttps://{link}/company/{organization_info.uid}/project/{project_info.uid}/task/{task.uid}/overview")
+            #     print('Название проекта - ', project_info.name)
+            #     print('Название задачи - ', task.name)
+            #
+            #     url = f"https://{link}/company/{organization_info.uid}/project/{project_info.uid}/task/{task.uid}/overview"
+            #     webbrowser.open(url, new=2)
+            if not os.path.exists('out'):
+                os.makedirs('out')
+            with open('out/results.txt', 'w', encoding='utf-8') as file:
+                if not os.path.exists('out'):
+                    os.makedirs('out')
+                file.write("Результаты поиска по названию задачи:\n")
+                for task, organization_id in results:
+                    task_info, project_info, organization_info = await get_task_info(client, task.uid, organization_id)
+                    file.write(f"Организация - {organization_info.name}\n")
+                    file.write(
+                        f"Ссылка на проект: https://{link}/company/{organization_info.uid}/project/{project_info.uid}/task/{task.uid}/overview\n")
+                    file.write(f"Название проекта - {project_info.name}\n")
+                    file.write(f"Название задачи - {task.name}\n\n")
+
+        else:
+            print('Задача с указанным названием не найдена.')
+    except Exception as e:
+        print(f"Ошибка при поиске по названию задачи: {e}")
+
+
+async def main():
+    # or_stderr = sys.stderr
+    # sys.stderr = open(os.devnull, 'w')
+    print('Выберите инстанс:')
+    print('1. Sigma', '\n''2. Cloud')
+    instance_choice = input('Введите номер инстанса: ')
+    instance = 'Sigma' if instance_choice == '1' else 'Cloud'
+
+    if instance_choice not in ['1', '2']:
+        print('Некорректный выбор инстанса.')
+        return
+
+    client = TagmeClientAdvanced(
+        os.path.expanduser('~/configs/.sigma.cfg')) if instance == 'Sigma' else TagmeClientAdvanced(
+        os.path.expanduser('~/configs/.cloud.cfg'))
+
+    search_method = input('Выберите метод поиска:\n1. по task_id \n2. по названию задачи\n')
+    if search_method == '1':
+        task_id = input('Введите task_id: ')
+        await get_project_by_task_id(instance, task_id, client)
+    elif search_method == '2':
+        task_name = input('Введите название задачи: ')
+        await get_project_by_task_name(instance, task_name, client)
+    else:
+        print('Некорректный выбор метода поиска.')
+    # sys.stderr.close()
+    # sys.stderr=or_stderr
+
+if __name__ == '__main__':
+    asyncio.run(main())
